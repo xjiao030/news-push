@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>全球新闻早报</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:"PingFang SC","Microsoft YaHei",sans-serif;background:#f5f5f5;padding:16px;min-height:100vh}
+.container{max-width:700px;margin:auto;background:#fff;border-radius:20px;padding:24px;box-shadow:0 4px 12px rgba(0,0,0,.1)}
+h1{font-size:24px;color:#222;border-bottom:3px solid #ff4757;padding-bottom:12px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center}
+h1 span{font-size:14px;background:#ff4757;color:#fff;padding:4px 12px;border-radius:20px;cursor:pointer}
+.article{margin-bottom:20px;padding:14px;border-left:4px solid #ff4757;background:#fff5f5;border-radius:8px;transition:.2s}
+.article:active{background:#ffeaea}
+.title{font-size:17px;font-weight:600;margin-bottom:6px}
+.title a{color:#222;text-decoration:none}
+.title a:active{color:#ff4757}
+.meta{font-size:12px;color:#999;margin-bottom:8px}
+.source{color:#ff4757;font-weight:600}
+.desc{font-size:14px;color:#555;line-height:1.6}
+.footer{text-align:center;color:#bbb;font-size:12px;margin-top:32px}
+.loading{text-align:center;padding:40px;color:#999}
+.refresh-btn{display:block;margin:0 auto 20px;background:#ff4757;color:#fff;border:none;padding:10px 28px;border-radius:20px;font-size:15px;cursor:pointer}
+.refresh-btn:active{background:#e04040}
+.error{color:#e04040;text-align:center}
+.search-box{display:flex;gap:10px;margin-bottom:20px}
+.search-box input{flex:1;padding:10px;border:1px solid #ddd;border-radius:10px;font-size:14px}
+.search-box button{background:#ff4757;color:#fff;border:none;padding:10px 16px;border-radius:10px;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>🌍 全球新闻早报 <span id="notify-btn" onclick="askNotification()">🔔 开启推送</span></h1>
+<div class="search-box">
+  <input type="text" id="searchInput" placeholder="搜索新闻关键词…">
+  <button onclick="searchNews()">搜索</button>
+</div>
+<button class="refresh-btn" onclick="fetchNews()">🔄 刷新新闻</button>
+<div id="news-list"><div class="loading">加载中…</div></div>
+<div class="footer">⏱ 每30分钟自动更新 · 点击标题阅读原文</div>
+</div>
+
+<script>
+// 你发布的 news.json 地址（务必替换成你自己的）
+const NEWS_JSON_URL = 'https://你的用户名.github.io/news-push/news.json';
+
+let allNews = [];
+async function fetchNews() {
+  const list = document.getElementById('news-list');
+  list.innerHTML = '<div class="loading">加载中…</div>';
+  try {
+    const res = await fetch(NEWS_JSON_URL + '?v=' + Date.now());
+    if (!res.ok) throw new Error('网络错误');
+    allNews = await res.json();
+    displayNews(allNews);
+    // 检查新消息并通知
+    checkForNewNews(allNews);
+  } catch(e) {
+    list.innerHTML = '<div class="error">暂时无法加载，请检查网络或稍后刷新</div>';
+  }
+}
+
+function displayNews(newsArr) {
+  const list = document.getElementById('news-list');
+  if (!newsArr || newsArr.length===0) {
+    list.innerHTML = '<div class="loading">暂无新闻，请稍后刷新</div>';
+    return;
+  }
+  let html = '';
+  newsArr.forEach(item => {
+    const time = new Date(item.time || item.published).toLocaleString('zh-CN');
+    html += `<div class="article">
+      <div class="title"><a href="${item.link}" target="_blank">${item.title}</a></div>
+      <div class="meta"><span class="source">${item.source}</span> · ${time}</div>
+      <div class="desc">${item.desc || ''}</div>
+    </div>`;
+  });
+  list.innerHTML = html;
+}
+
+function searchNews() {
+  const keyword = document.getElementById('searchInput').value.trim().toLowerCase();
+  if (!keyword) {
+    displayNews(allNews);
+    return;
+  }
+  const filtered = allNews.filter(item => 
+    item.title.toLowerCase().includes(keyword) || 
+    (item.desc||'').toLowerCase().includes(keyword)
+  );
+  displayNews(filtered);
+}
+
+// ======= 推送通知功能 =======
+function askNotification() {
+  if (!('Notification' in window)) {
+    alert('你的浏览器不支持通知，请在手机或电脑的Chrome中打开');
+    return;
+  }
+  Notification.requestPermission().then(perm => {
+    if (perm === 'granted') {
+      document.getElementById('notify-btn').textContent = '🔔 已开启推送';
+      registerSW();
+      alert('推送已开启！我们每30分钟检查一次，有新消息会通知你。');
+    } else {
+      alert('你拒绝了通知，需要的话可以在浏览器设置里重新开启');
+    }
+  });
+}
+
+function registerSW() {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').then(() => {
+      console.log('Service Worker 注册成功');
+    }).catch(err => {
+      console.log('SW注册失败', err);
+    });
+  }
+}
+
+function checkForNewNews(newsArr) {
+  // 对比已存储的最新新闻标题，如果有新内容则弹通知
+  const lastTitle = localStorage.getItem('lastNewsTitle');
+  if (newsArr.length > 0 && newsArr[0].title !== lastTitle) {
+    localStorage.setItem('lastNewsTitle', newsArr[0].title);
+    // 弹出一个浏览器通知
+    if (Notification.permission === 'granted' && navigator.serviceWorker) {
+      navigator.serviceWorker.ready.then(reg => {
+        reg.showNotification('📰 有新的全球要闻！', {
+          body: newsArr[0].title,
+          icon: 'https://www.google.com/s2/favicons?domain=github.com',
+          data: { url: newsArr[0].link }
+        });
+      });
+    }
+  }
+}
+
+// 初始加载
+fetchNews();
+// 每30分钟自动刷新一次
+setInterval(fetchNews, 30*60*1000);
+</script>
+</body>
+</html>
